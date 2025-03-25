@@ -59,10 +59,86 @@ namespace ApiClassLibrary.Controllers
         public virtual async Task<ActionResult<IEnumerable<TModel>>> GetAll(
             [FromQuery] string? range = null,
             [FromQuery] string? asc = null,
-            [FromQuery] string? desc = null)
+            [FromQuery] string? desc = null,
+            [FromQuery] Dictionary<string, string>? filters = null,
+            [FromQuery] string? fields = null
+            )
         {
             // On récupère les entités non supprimées
             IQueryable<TModel> query = _context.Set<TModel>().Where(x => !x.Deleted);
+            
+            //filters
+            
+            if (filters != null)
+            {
+                foreach (var filter in filters)
+                {
+                    var propertyName = filter.Key.ToLower();
+                    var filterValue = filter.Value;
+
+                    // Vérifie que la propriété existe dans le modèle
+                    var property = typeof(TModel).GetProperties()
+                        .FirstOrDefault(p => p.Name.ToLower() == propertyName);
+
+                    if (property == null) continue; // Ignore les champs inconnus
+
+                    var parameter = Expression.Parameter(typeof(TModel), "x");
+                    var member = Expression.PropertyOrField(parameter, property.Name);
+
+                    Expression? expression = null;
+
+                    if (filterValue.StartsWith("[") && filterValue.EndsWith("]"))
+                    {
+                        // Cas plage de valeurs [min,max]
+                        var rangeVals = filterValue.Trim('[', ']').Split(',');
+                        if (rangeVals.Length == 2)
+                        {
+                            var lower = rangeVals[0];
+                            var upper = rangeVals[1];
+
+                            if (!string.IsNullOrWhiteSpace(lower))
+                            {
+                                var lowerConst = Expression.Constant(Convert.ChangeType(lower, property.PropertyType));
+                                var ge = Expression.GreaterThanOrEqual(member, lowerConst);
+                                expression = ge;
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(upper))
+                            {
+                                var upperConst = Expression.Constant(Convert.ChangeType(upper, property.PropertyType));
+                                var le = Expression.LessThanOrEqual(member, upperConst);
+                                expression = expression != null ? Expression.AndAlso(expression, le) : le;
+                            }
+                        }
+                    }
+                    else if (filterValue.Contains(','))
+                    {
+                        // Cas multiple valeurs (IN)
+                        var values = filterValue.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                            .Select(v => Convert.ChangeType(v, property.PropertyType))
+                            .ToList();
+
+                        var equals = values.Select(v =>
+                            (Expression)Expression.Equal(member, Expression.Constant(v))
+                        );
+
+                        expression = equals.Aggregate(Expression.OrElse);
+                    }
+                    else
+                    {
+                        // Cas valeur simple
+                        var typedValue = Convert.ChangeType(filterValue, property.PropertyType);
+                        expression = Expression.Equal(member, Expression.Constant(typedValue));
+                    }
+
+                    if (expression != null)
+                    {
+                        var lambda = Expression.Lambda<Func<TModel, bool>>(expression, parameter);
+                        query = query.Where(lambda);
+                    }
+                }
+            }
+
 
             //  APPLICATION DU TRI
             if (!string.IsNullOrEmpty(asc) || !string.IsNullOrEmpty(desc))
@@ -146,9 +222,131 @@ namespace ApiClassLibrary.Controllers
             links.Add($"<{baseUrl}?range={lastStart}-{lastEnd}>; rel=\"last\"");
 
             Response.Headers.Add("Link", string.Join(", ", links));
+            
+            // Si "fields" est présent, on retourne des objets dynamiques contenant uniquement ces propriétés
+            if (!string.IsNullOrWhiteSpace(fields))
+            {
+                var selectedFields = fields.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(f => f.Trim().ToLower())
+                    .ToList();
+
+                // On projette dynamiquement les objets avec uniquement les propriétés demandées
+                var shaped = data.Select(item =>
+                {
+                    var dict = new Dictionary<string, object?>();
+                    foreach (var prop in typeof(TModel).GetProperties())
+                    {
+                        if (selectedFields.Contains(prop.Name.ToLower()))
+                        {
+                            dict[prop.Name.ToLower()] = prop.GetValue(item);
+                        }
+                    }
+                    return dict;
+                });
+
+                return Ok(shaped);
+            }
+
 
             return Ok(data);
         }
+        
+        [HttpGet("search")]
+        public virtual async Task<ActionResult<IEnumerable<TModel>>> Search(
+            [FromQuery] Dictionary<string, string>? filters = null,
+            [FromQuery] string? sort = null)
+        {
+            IQueryable<TModel> query = _context.Set<TModel>().Where(x => !x.Deleted);
+
+            if (filters != null)
+            {
+                foreach (var filter in filters)
+                {
+                    var propertyName = filter.Key.ToLower();
+                    var value = filter.Value;
+
+                    var prop = typeof(TModel).GetProperties()
+                        .FirstOrDefault(p => p.Name.ToLower() == propertyName);
+
+                    if (prop == null) continue;
+
+                    var parameter = Expression.Parameter(typeof(TModel), "x");
+                    var member = Expression.Property(parameter, prop.Name);
+
+                    Expression? predicate = null;
+
+                    // 🔍 Si la valeur contient des *, on fait une recherche floue (Contains)
+                    if (value.StartsWith("*") || value.EndsWith("*"))
+                    {
+                        var cleaned = value.Replace("*", "");
+                        var method = typeof(string).GetMethod("Contains", new[] { typeof(string) });
+                        predicate = Expression.Call(member, method!, Expression.Constant(cleaned));
+                    }
+                    else if (value.Contains(','))
+                    {
+                        // 🎯 IN : plusieurs valeurs séparées par virgule
+                        var values = value.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                          .Select(v => Convert.ChangeType(v.Trim(), prop.PropertyType))
+                                          .ToList();
+
+                        var equals = values.Select(v =>
+                            (Expression)Expression.Equal(member, Expression.Constant(v))
+                        );
+
+                        predicate = equals.Aggregate(Expression.OrElse);
+                    }
+                    else
+                    {
+                        // 🟢 Égalité simple
+                        var val = Convert.ChangeType(value, prop.PropertyType);
+                        predicate = Expression.Equal(member, Expression.Constant(val));
+                    }
+
+                    if (predicate != null)
+                    {
+                        var lambda = Expression.Lambda<Func<TModel, bool>>(predicate, parameter);
+                        query = query.Where(lambda);
+                    }
+                }
+            }
+
+            // 🔀 Tri combiné si "sort" est spécifié
+            if (!string.IsNullOrWhiteSpace(sort))
+            {
+                IOrderedQueryable<TModel>? ordered = null;
+                foreach (var field in sort.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var prop = typeof(TModel).GetProperties()
+                        .FirstOrDefault(p => p.Name.Equals(field.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                    if (prop == null) continue;
+
+                    var param = Expression.Parameter(typeof(TModel), "x");
+                    var property = Expression.Property(param, prop.Name);
+                    var lambda = Expression.Lambda(property, param);
+
+                    string method = ordered == null ? "OrderBy" : "ThenBy";
+
+                    var result = Expression.Call(
+                        typeof(Queryable),
+                        method,
+                        new Type[] { typeof(TModel), prop.PropertyType },
+                        (ordered ?? query).Expression,
+                        Expression.Quote(lambda)
+                    );
+
+                    ordered = (IOrderedQueryable<TModel>)query.Provider.CreateQuery(result);
+                }
+
+                if (ordered != null)
+                {
+                    query = ordered;
+                }
+            }
+
+            return Ok(await query.ToListAsync());
+        }
+
 
         // GET: api/[Models]/5
         [HttpGet("{id}")]

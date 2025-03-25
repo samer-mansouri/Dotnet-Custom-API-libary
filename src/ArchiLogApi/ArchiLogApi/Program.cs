@@ -2,9 +2,20 @@ using ArchiLogApi.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc.Versioning;
 using Microsoft.AspNetCore.Mvc;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Host.UseSerilog((context, services, configuration) =>
+{
+    configuration
+        .Enrich.FromLogContext()
+        .Enrich.WithEnvironmentName()
+        .WriteTo.Console()
+        .WriteTo.File("Logs/log-.txt", rollingInterval: RollingInterval.Day)
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services);
+});
 // Add services to the container.
 
 builder.Services.AddControllers();
@@ -30,6 +41,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+app.UseSerilogRequestLogging();
 
 app.UseHttpsRedirection();
 
