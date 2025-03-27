@@ -11,7 +11,7 @@ using ApiClassLibrary.Controllers;
 
 namespace ArchiLogApi.Controllers
 {
-    
+    [ApiVersion("1.0")]
     public class ReservationsController : BaseController<ArchiLogDbContext, Reservation>
     {
         

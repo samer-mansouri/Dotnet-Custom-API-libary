@@ -41,8 +41,8 @@ namespace ApiClassLibrary.Controllers
         public virtual async Task<ActionResult<IEnumerable<TModel>>> GetAll(
             [FromQuery] string? range = null,
             [FromQuery] string? asc = null,
-            [FromQuery] string? desc = null,
-            [FromQuery] Dictionary<string, string>? filters = null,
+            [FromQuery] string? desc = null, //model,brand,id
+            [FromQuery] Dictionary<string, string>? filters = null, //{ "id": 1 }
             [FromQuery] string? fields = null
         )
         {
@@ -100,7 +100,7 @@ namespace ApiClassLibrary.Controllers
                     }
                     else if (value.Contains(','))
                     {
-                        // 🎯 IN : plusieurs valeurs séparées par virgule
+                        // IN : plusieurs valeurs séparées par virgule
                         var values = value.Split(',', StringSplitOptions.RemoveEmptyEntries)
                                           .Select(v => Convert.ChangeType(v.Trim(), prop.PropertyType))
                                           .ToList();
@@ -113,7 +113,7 @@ namespace ApiClassLibrary.Controllers
                     }
                     else
                     {
-                        // 🟢 Égalité simple
+                        // Égalité simple
                         var val = Convert.ChangeType(value, prop.PropertyType);
                         predicate = Expression.Equal(member, Expression.Constant(val));
                     }
@@ -126,7 +126,7 @@ namespace ApiClassLibrary.Controllers
                 }
             }
 
-            // 🔀 Tri combiné si "sort" est spécifié
+            // Tri combiné si "sort" est spécifié
             if (!string.IsNullOrWhiteSpace(sort))
             {
                 IOrderedQueryable<TModel>? ordered = null;

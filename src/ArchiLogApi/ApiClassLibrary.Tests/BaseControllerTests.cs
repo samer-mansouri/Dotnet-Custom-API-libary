@@ -14,13 +14,13 @@ using ApiClassLibrary.Data;
 
 namespace ApiClassLibrary.Tests
 {
-    // 🔧 Modèle factice basé sur BaseModel
+    //  Modèle factice basé sur BaseModel
     public class FakeModel : BaseModel
     {
         public string Label { get; set; } = "";
     }
 
-    // 🔧 DbContext de test
+    //  DbContext de test
     public class FakeDbContext : BaseDbContext
     {
         public FakeDbContext(DbContextOptions options) : base(options) { }
@@ -68,14 +68,14 @@ namespace ApiClassLibrary.Tests
             Assert.Equal(3, models.Count());
         }
 
-        // 🔧 Contrôleur de test héritant du contrôleur abstrait
+        // Contrôleur de test héritant du contrôleur abstrait
         private class TestFakeController : BaseController<FakeDbContext, FakeModel>
         {
             public TestFakeController(
                 FakeDbContext context)
                 : base(context)
             {
-                // 🔁 Simule l’environnement HTTP pour les headers
+                //  Simule l’environnement HTTP pour les headers
                 ControllerContext = new ControllerContext
                 {
                     HttpContext = new DefaultHttpContext()
